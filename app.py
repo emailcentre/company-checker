@@ -29,18 +29,6 @@ st.markdown("""
         color: white !important;
         border: 2px solid #B91C1C !important;
     }
-    .success-box {
-        padding: 1rem;
-        background-color: #D1FAE5;
-        border-radius: 0.5rem;
-        border-left: 5px solid #10B981;
-    }
-    .warning-box {
-        padding: 1rem;
-        background-color: #FEF3C7;
-        border-radius: 0.5rem;
-        border-left: 5px solid #F59E0B;
-    }
     .stButton>button {
         width: 100%;
     }
@@ -405,19 +393,11 @@ with col2:
                         st.session_state.processing = False
                         
                         if st.session_state.stop_processing:
-                            st.warning(f"""
-                            <div class="warning-box">
-                            ⚠️ Processing was stopped early.<br>
-                            <strong>{len(results_df)} out of {len(df)}</strong> companies were processed.
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.warning(f"⚠️ Processing was stopped early.\n"
+                                     f"**{len(results_df)} out of {len(df)}** companies were processed.")
                         else:
-                            st.success(f"""
-                            <div class="success-box">
-                            ✅ Processing complete!<br>
-                            All <strong>{len(results_df)}</strong> companies processed successfully.
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.success(f"✅ Processing complete!\n"
+                                     f"All **{len(results_df)}** companies processed successfully.")
                         
                         # Show summary statistics
                         st.subheader("📈 Results Summary")
@@ -460,15 +440,14 @@ with col2:
                                 if len(good_matches) > 0:
                                     with st.expander("🎯 Example Good Matches"):
                                         for _, row in good_matches.iterrows():
-                                            status_color = "green" if row['ch_company_status'] == 'active' else "orange"
                                             st.markdown(f"""
                                             **Original:** {row[column_name]}  
                                             **Matched:** {row['ch_company_name']}  
-                                            **Status:** <span style='color:{status_color};'>{row['ch_company_status'].upper()}</span>  
+                                            **Status:** {row['ch_company_status'].upper()}  
                                             **Company No:** {row['ch_company_number']}  
                                             **Match Score:** {row['ch_match_score']}%
                                             ---
-                                            """, unsafe_allow_html=True)
+                                            """)
                     
                     except Exception as e:
                         st.error(f"Processing error: {str(e)}")
@@ -489,3 +468,4 @@ st.markdown("""
 # Auto-reset stop flag when not processing
 if not st.session_state.processing and st.session_state.stop_processing:
     st.session_state.stop_processing = False
+
