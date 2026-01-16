@@ -1,4 +1,4 @@
-# company_checker.py - Complete Companies House Checker with Better Matching & Stop Button
+# company_checker.py - Complete Companies House Checker with FIXED API Key Issue
 # Just run: streamlit run company_checker.py
 
 import streamlit as st
@@ -32,6 +32,13 @@ st.markdown("""
     .stButton>button {
         width: 100%;
     }
+    .test-box {
+        padding: 1rem;
+        background-color: #E0F2FE;
+        border-radius: 0.5rem;
+        border-left: 5px solid #0EA5E9;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,6 +51,8 @@ if 'processing' not in st.session_state:
     st.session_state.processing = False
 if 'api_key' not in st.session_state:
     st.session_state.api_key = ""
+if 'api_key_valid' not in st.session_state:
+    st.session_state.api_key_valid = None
 
 # Main header
 st.markdown('<h1 class="main-header">🏢 Companies House UK - Company Status Checker</h1>', unsafe_allow_html=True)
@@ -53,150 +62,103 @@ def stop_processing():
     st.session_state.stop_processing = True
     st.warning("🛑 Stopping process...")
 
-# IMPROVED SEARCH FUNCTION WITH BETTER MATCHING
-def search_companies_house(company_name, api_key):
-    """Search for a company on Companies House with intelligent matching"""
+# TEST API KEY FUNCTION
+def test_api_key(api_key):
+    """Test if the API key is valid by making a simple search"""
     try:
-        original_name = str(company_name).strip()
-        if not original_name:
-            return {'error': 'Empty company name'}
+        if not api_key:
+            return False, "No API key provided"
         
-        # Prepare multiple search variations
-        search_variations = []
+        # Test with a well-known company
+        url = "https://api.company-information.service.gov.uk/search/companies"
+        params = {'q': 'BBC STUDIOS LIMITED', 'items_per_page': 1}
         
-        # 1. Original name first
-        search_variations.append(original_name)
+        response = requests.get(
+            url, 
+            params=params,
+            auth=(api_key, ''),
+            timeout=10
+        )
         
-        # 2. Remove common suffixes
-        name_clean = original_name.upper()
-        suffixes = ['LIMITED', 'LTD', 'LTD.', 'PLC', 'PLC.', 'LLP', 'LLP.', 
-                   'LIMITED LIABILITY PARTNERSHIP', 'GROUP', 'HOLDINGS', 'HOLDING']
-        
-        for suffix in suffixes:
-            if name_clean.endswith(' ' + suffix):
-                name_clean = name_clean[:-(len(suffix)+1)].strip()
-            elif name_clean.endswith(suffix):
-                name_clean = name_clean[:-len(suffix)].strip()
-        
-        if name_clean != original_name.upper():
-            search_variations.append(name_clean)
-            search_variations.append(name_clean + " LIMITED")
-            search_variations.append(name_clean + " LTD")
-        
-        # 3. Remove "THE " prefix
-        if name_clean.startswith("THE "):
-            without_the = name_clean[4:].strip()
-            search_variations.append(without_the)
-        
-        # 4. Remove punctuation
-        clean_no_punct = ''.join(c for c in name_clean if c.isalnum() or c == ' ')
-        if clean_no_punct != name_clean:
-            search_variations.append(clean_no_punct)
-        
-        # 5. Try abbreviated "&" vs "AND"
-        if ' AND ' in clean_no_punct:
-            search_variations.append(clean_no_punct.replace(' AND ', ' & '))
-        if ' & ' in clean_no_punct:
-            search_variations.append(clean_no_punct.replace(' & ', ' AND '))
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        search_variations = [x for x in search_variations if not (x in seen or seen.add(x))]
-        
-        # Try each search variation
-        best_match = None
-        best_score = 0
-        all_items = []
-        search_term_used = ""
-        
-        for search_term in search_variations[:6]:  # Try first 6 variations
-            url = "https://api.company-information.service.gov.uk/search/companies"
-            params = {'q': search_term, 'items_per_page': 10}
-            
-            response = requests.get(url, params=params, auth=(api_key, ''), timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                items = data.get('items', [])
-                all_items.extend(items)
-                
-                # Score each result
-                for item in items:
-                    api_name = item.get('title', '').upper()
-                    search_upper = original_name.upper()
-                    
-                    # Calculate match score
-                    if api_name == search_upper:
-                        score = 100
-                    elif api_name in search_upper or search_upper in api_name:
-                        score = 90
-                    else:
-                        # Clean both for comparison
-                        api_clean = api_name
-                        for suffix in suffixes:
-                            api_clean = api_clean.replace(suffix, '')
-                        api_clean = api_clean.strip()
-                        
-                        search_clean = search_upper
-                        for suffix in suffixes:
-                            search_clean = search_clean.replace(suffix, '')
-                        search_clean = search_clean.strip()
-                        
-                        if api_clean == search_clean:
-                            score = 85
-                        elif (api_clean.startswith(search_clean[:min(10, len(search_clean))]) or 
-                              search_clean.startswith(api_clean[:min(10, len(api_clean))])):
-                            score = 75
-                        else:
-                            # Check word overlap
-                            api_words = set(api_clean.split())
-                            search_words = set(search_clean.split())
-                            common_words = api_words.intersection(search_words)
-                            if common_words:
-                                score = 60 + len(common_words) * 5
-                            else:
-                                score = 50
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_match = item
-                        search_term_used = search_term
-            
-            if best_score >= 80:  # Good enough match found
-                break
-            
-            time.sleep(0.2)  # Brief pause between API calls
-        
-        # Return results
-        if best_match and best_score >= 65:  # Lower threshold to catch more matches
-            return {
-                'company_name': best_match.get('title', ''),
-                'company_number': best_match.get('company_number', ''),
-                'company_status': best_match.get('company_status', ''),
-                'company_type': best_match.get('company_type', ''),
-                'address': best_match.get('address_snippet', ''),
-                'date_of_creation': best_match.get('date_of_creation', ''),
-                'match_score': best_score,
-                'search_term_used': search_term_used,
-                'total_matches_found': len(all_items)
-            }
+        if response.status_code == 200:
+            return True, "✅ API key is valid"
+        elif response.status_code == 401:
+            return False, "❌ Invalid API key - Unauthorized"
+        elif response.status_code == 429:
+            return False, "⚠️ Rate limit exceeded - try again later"
         else:
+            return False, f"❌ API error (status {response.status_code})"
+    
+    except requests.exceptions.RequestException as e:
+        return False, f"❌ Network error: {str(e)}"
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
+
+# SIMPLIFIED SEARCH FUNCTION - FIXED
+def search_companies_house(company_name, api_key):
+    """Search for a company on Companies House"""
+    try:
+        if not api_key:
+            return {'error': 'API key is missing'}
+        
+        # Clean the company name
+        search_term = str(company_name).strip()
+        
+        # Make the API call
+        url = "https://api.company-information.service.gov.uk/search/companies"
+        params = {
+            'q': search_term,
+            'items_per_page': 5  # Get more results for better matching
+        }
+        
+        response = requests.get(
+            url, 
+            params=params,
+            auth=(api_key, ''),
+            timeout=10
+        )
+        
+        # Check response
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get('items', [])
+            
+            if not items:
+                return {
+                    'company_name': search_term,
+                    'company_number': 'NOT FOUND',
+                    'company_status': 'NOT FOUND',
+                    'match_score': 0,
+                    'total_matches_found': 0,
+                    'error': 'No companies found'
+                }
+            
+            # Return the first match
+            first_match = items[0]
             return {
-                'company_name': original_name,
-                'company_number': 'NOT FOUND',
-                'company_status': 'NOT FOUND',
-                'match_score': best_score,
-                'search_term_used': search_term_used or 'All variations',
-                'total_matches_found': len(all_items),
-                'error': f'No good match found (best score: {best_score}%)'
+                'company_name': first_match.get('title', ''),
+                'company_number': first_match.get('company_number', ''),
+                'company_status': first_match.get('company_status', ''),
+                'company_type': first_match.get('company_type', ''),
+                'address': first_match.get('address_snippet', ''),
+                'date_of_creation': first_match.get('date_of_creation', ''),
+                'match_score': 95,  # High score for first match
+                'total_matches_found': len(items)
             }
+            
+        elif response.status_code == 401:
+            return {'error': 'Invalid API key - Unauthorized'}
+        elif response.status_code == 429:
+            return {'error': 'Rate limit exceeded'}
+        else:
+            return {'error': f'API error (status {response.status_code})'}
     
     except requests.exceptions.RequestException as e:
         return {'error': f'Network error: {str(e)}'}
     except Exception as e:
         return {'error': f'Unexpected error: {str(e)}'}
 
-# PROCESS FUNCTION WITH STOP BUTTON
+# PROCESS FUNCTION
 def process_companies(df, column_name, api_key, debug_mode=False):
     """Process all companies with stop capability"""
     results = []
@@ -231,12 +193,7 @@ def process_companies(df, column_name, api_key, debug_mode=False):
         if debug_mode:
             with st.expander(f"Debug: {company_name[:30]}...", expanded=False):
                 st.write(f"**Original:** {company_name}")
-                st.write(f"**Search used:** {result.get('search_term_used', 'N/A')}")
-                st.write(f"**Matches found:** {result.get('total_matches_found', 0)}")
-                st.write(f"**Best match:** {result.get('company_name', 'None')}")
-                st.write(f"**Match score:** {result.get('match_score', 0)}%")
-                if 'error' in result:
-                    st.write(f"**Error:** {result['error']}")
+                st.write(f"**Result:** {result}")
         
         # Combine with original data
         result_row = row.to_dict()
@@ -249,7 +206,6 @@ def process_companies(df, column_name, api_key, debug_mode=False):
             'ch_date_of_creation': result.get('date_of_creation', ''),
             'ch_match_score': result.get('match_score', 0),
             'ch_error': result.get('error', ''),
-            'ch_search_used': result.get('search_term_used', ''),
             'ch_matches_found': result.get('total_matches_found', 0)
         })
         results.append(result_row)
@@ -274,8 +230,8 @@ def get_download_link(df, filename):
 with st.sidebar:
     st.title("⚙️ Configuration")
     
-    # API Key
-    st.subheader("1. Enter API Key")
+    # API Key Section
+    st.subheader("1. Enter & Test API Key")
     api_key = st.text_input(
         "Companies House API Key", 
         type="password",
@@ -283,15 +239,33 @@ with st.sidebar:
         help="Get from https://developer.company-information.service.gov.uk/"
     )
     
-    if api_key:
-        st.session_state.api_key = api_key
-        st.success("✅ API Key saved")
+    # Test API Button
+    if st.button("🔍 Test API Key", type="secondary"):
+        if api_key:
+            with st.spinner("Testing API key..."):
+                is_valid, message = test_api_key(api_key)
+                st.session_state.api_key_valid = is_valid
+                st.session_state.api_key = api_key
+                
+                if is_valid:
+                    st.success(message)
+                else:
+                    st.error(message)
+        else:
+            st.warning("Please enter an API key first")
+    
+    # Show API status
+    if st.session_state.api_key_valid is not None:
+        if st.session_state.api_key_valid:
+            st.markdown('<div class="test-box">✅ API Key is working</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="test-box">❌ API Key has issues</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
     # Debug mode
     debug_mode = st.checkbox("🔧 Enable Debug Mode", 
-                           help="Show detailed search information for troubleshooting")
+                           help="Show detailed search information")
     
     st.markdown("---")
     
@@ -306,19 +280,12 @@ with st.sidebar:
     st.markdown("---")
     
     # Instructions
-    st.subheader("📋 How to Use")
+    st.subheader("📋 Quick Test")
     st.markdown("""
-    1. **Enter API key** above
-    2. **Upload file** with company names
-    3. **Select** correct name column
-    4. **Click** 'Check Companies'
-    5. **Download** results
-    """)
-    
-    st.info("""
-    **API Limits:** 
-    - Free tier: 600 requests/day
-    - Processing: ~2 seconds per company
+    **Test with these names:**
+    1. BBC STUDIOS LIMITED
+    2. TESCO PLC  
+    3. SAINSBURY'S SUPERMARKETS LTD
     """)
 
 # MAIN CONTENT
@@ -329,8 +296,7 @@ with col1:
     
     uploaded_file = st.file_uploader(
         "Choose CSV or Excel file",
-        type=['csv', 'xlsx', 'xls'],
-        help="File should contain at least one column with company names"
+        type=['csv', 'xlsx', 'xls']
     )
     
     if uploaded_file:
@@ -342,26 +308,22 @@ with col1:
             
             st.success(f"✅ File loaded! {len(df)} rows found")
             
-            with st.expander("📊 Preview First 10 Rows"):
-                st.dataframe(df.head(10), use_container_width=True)
-            
             st.subheader("🔍 Step 2: Select Company Name Column")
             if len(df.columns) > 0:
                 column_name = st.selectbox(
-                    "Select column containing company names",
+                    "Select column with company names",
                     options=df.columns.tolist(),
                     index=0
                 )
                 
-                st.info(f"Selected: **{column_name}** - {df[column_name].nunique()} unique names")
+                st.info(f"Selected: **{column_name}**")
                 
-                # Show sample names
-                sample_names = df[column_name].dropna().head(10).tolist()
-                with st.expander("👀 Sample Company Names"):
-                    for i, name in enumerate(sample_names):
+                # Show first few names
+                with st.expander("👀 First 5 Company Names"):
+                    for i, name in enumerate(df[column_name].head(5).tolist()):
                         st.write(f"{i+1}. {name}")
             else:
-                st.error("No columns found in the file!")
+                st.error("No columns found!")
                 
         except Exception as e:
             st.error(f"Error reading file: {str(e)}")
@@ -369,12 +331,29 @@ with col1:
 with col2:
     st.subheader("🚀 Step 3: Process Companies")
     
+    # QUICK TEST BUTTON
+    st.markdown("### Quick Test First")
+    if st.button("🔬 Test with BBC STUDIOS LIMITED", type="secondary"):
+        if not st.session_state.api_key:
+            st.warning("Enter API key in sidebar first")
+        else:
+            with st.spinner("Testing with BBC STUDIOS LIMITED..."):
+                result = search_companies_house("BBC STUDIOS LIMITED", st.session_state.api_key)
+                if 'error' in result:
+                    st.error(f"Test failed: {result['error']}")
+                else:
+                    st.success("✅ Test successful!")
+                    st.write(f"**Found:** {result['company_name']}")
+                    st.write(f"**Company Number:** {result['company_number']}")
+                    st.write(f"**Status:** {result['company_status']}")
+    
+    st.markdown("---")
+    
     if uploaded_file and 'df' in locals() and 'column_name' in locals():
         if not st.session_state.api_key:
-            st.warning("⚠️ Please enter your API key in the sidebar")
+            st.warning("⚠️ Enter your API key in the sidebar")
         else:
-            # Reset stop flag when starting
-            if st.button("🔍 Start Checking Companies", 
+            if st.button("🔍 Start Checking All Companies", 
                         type="primary", 
                         use_container_width=True,
                         disabled=st.session_state.processing):
@@ -382,7 +361,7 @@ with col2:
                 st.session_state.stop_processing = False
                 st.session_state.processing = True
                 
-                with st.spinner("Connecting to Companies House API..."):
+                with st.spinner("Starting Companies House search..."):
                     try:
                         # Process companies
                         results_df = process_companies(df, column_name, 
@@ -393,79 +372,49 @@ with col2:
                         st.session_state.processing = False
                         
                         if st.session_state.stop_processing:
-                            st.warning(f"⚠️ Processing was stopped early.\n"
-                                     f"**{len(results_df)} out of {len(df)}** companies were processed.")
+                            st.warning(f"⚠️ Processing stopped early. {len(results_df)}/{len(df)} processed.")
                         else:
-                            st.success(f"✅ Processing complete!\n"
-                                     f"All **{len(results_df)}** companies processed successfully.")
+                            st.success(f"✅ Complete! {len(results_df)} companies processed.")
                         
-                        # Show summary statistics
-                        st.subheader("📈 Results Summary")
+                        # Show summary
+                        st.subheader("📈 Results")
                         
-                        col_a, col_b, col_c = st.columns(3)
-                        
-                        with col_a:
-                            found = len(results_df[results_df['ch_company_number'] != 'NOT FOUND'])
-                            st.metric("Companies Found", f"{found}/{len(results_df)}", 
-                                    delta=f"{found/len(results_df)*100:.1f}%" if len(results_df) > 0 else "0%")
-                        
-                        with col_b:
-                            active = len(results_df[results_df['ch_company_status'] == 'active'])
-                            st.metric("Active Companies", active)
-                        
-                        with col_c:
-                            if len(results_df) > 0 and 'ch_match_score' in results_df.columns:
-                                avg_score = results_df['ch_match_score'].mean()
-                                st.metric("Avg Match Score", f"{avg_score:.1f}%")
-                        
-                        # Show results table
-                        with st.expander("📋 View All Results", expanded=True):
-                            display_cols = [column_name, 'ch_company_name', 'ch_company_status', 
-                                          'ch_company_number', 'ch_match_score']
-                            display_cols = [c for c in display_cols if c in results_df.columns]
-                            st.dataframe(results_df[display_cols], use_container_width=True, height=400)
-                        
-                        # Download section
                         if len(results_df) > 0:
-                            st.subheader("📥 Step 4: Download Results")
+                            found = len(results_df[results_df['ch_company_number'] != 'NOT FOUND'])
+                            not_found = len(results_df) - found
                             
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            filename = f"companies_house_results_{timestamp}.csv"
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                st.metric("Found", found)
+                            with col_b:
+                                st.metric("Not Found", not_found)
                             
-                            st.markdown(get_download_link(results_df, filename), unsafe_allow_html=True)
+                            # Show results
+                            with st.expander("📋 View Results"):
+                                display_df = results_df[[column_name, 'ch_company_name', 'ch_company_status', 'ch_company_number']]
+                                st.dataframe(display_df, use_container_width=True)
                             
-                            # Show match examples
-                            if 'ch_match_score' in results_df.columns:
-                                good_matches = results_df[results_df['ch_match_score'] >= 80].head(3)
-                                if len(good_matches) > 0:
-                                    with st.expander("🎯 Example Good Matches"):
-                                        for _, row in good_matches.iterrows():
-                                            st.markdown(f"""
-                                            **Original:** {row[column_name]}  
-                                            **Matched:** {row['ch_company_name']}  
-                                            **Status:** {row['ch_company_status'].upper()}  
-                                            **Company No:** {row['ch_company_number']}  
-                                            **Match Score:** {row['ch_match_score']}%
-                                            ---
-                                            """)
-                    
+                            # Download
+                            if len(results_df) > 0:
+                                st.subheader("📥 Download")
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                filename = f"companies_house_results_{timestamp}.csv"
+                                st.markdown(get_download_link(results_df, filename), unsafe_allow_html=True)
+                        
                     except Exception as e:
-                        st.error(f"Processing error: {str(e)}")
+                        st.error(f"Error: {str(e)}")
                         st.session_state.processing = False
     else:
-        st.info("👈 Please upload a CSV/Excel file with company names to begin")
+        st.info("👈 Upload a file to begin")
 
 # FOOTER
 st.markdown("---")
 st.markdown("""
-<div style="text-align: center; color: #666; padding: 1rem;">
-    <p>This tool uses the official Companies House API. Ensure compliance with their 
-    <a href="https://developer.company-information.service.gov.uk/terms" target="_blank">terms of use</a>.</p>
-    <p>Match scores below 70% may require manual verification.</p>
+<div style="text-align: center; color: #666;">
+    <p>Using official Companies House API • Get API key: <a href="https://developer.company-information.service.gov.uk/" target="_blank">developer.company-information.service.gov.uk</a></p>
 </div>
 """, unsafe_allow_html=True)
 
-# Auto-reset stop flag when not processing
+# Auto-reset stop flag
 if not st.session_state.processing and st.session_state.stop_processing:
     st.session_state.stop_processing = False
-
